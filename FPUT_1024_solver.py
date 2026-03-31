@@ -29,13 +29,10 @@ def get_acceleration(x, n, value, model_flag):  # get acc of all particles
 
 @njit(fastmath=True)  # 之前大loop的前半部分
 def evolve(x, v, a, dt, dt2, steps, n, value, model_flag):  # 把一个stride里头的step全跑了
-    for _ in range(steps):  # useless i
-        x_new = x + dt * v + 0.5 * dt2 * a  # 更新x, taylor expansion on x(t+dt), ignore x```/a`
-        a_new = get_acceleration(x_new, n, value, model_flag)  # use trapezium to integrate acceleration
-        v_new = v + 0.5 * dt * (a + a_new)
-
-        x = x_new
-        v = v_new
+    for _ in range(steps):
+        x += v * dt + 0.5 * dt2 * a
+        a_new = get_acceleration(x, n, value, model_flag)
+        v += 0.5 * dt * (a + a_new)
         a = a_new
 
     return x, v, a
@@ -43,8 +40,9 @@ def evolve(x, v, a, dt, dt2, steps, n, value, model_flag):  # 把一个stride里
 
 def get_energy(x, v, omega, n, modes_count):  # 4. FFT Helper, bye bye matrix multiplication :)
     # def of type1: 2*sigma(xi*sin)
-    a_k = scipy.fft.dst(x, type=1) / n
-    a_k_dot = scipy.fft.dst(v, type=1) / n
+    # use np.sqrt(2 * n) to normalize
+    a_k = scipy.fft.dst(x, type=1) / np.sqrt(2 * n)
+    a_k_dot = scipy.fft.dst(v, type=1) / np.sqrt(2 * n)
 
     # 计算每个 mode 的 total energy = kinetic energy + potential energy
     k_slice = slice(0, modes_count)
@@ -83,17 +81,17 @@ def main():
     # 1. Parameter Setup
 
     MODEL = "alpha"
-    VALUE = 0.25
+    VALUE = 0.2
     MODEL_FLAG = 0 if MODEL == "alpha" else 1
     SHAPE_FLAG = 0  # 画特定时间点的shape？1要0不要
-    N = 16
-    Dt2 = 0.125*0.125
+    N = 1024
+    Dt2 = 0.1*0.1
     Dt = np.sqrt(Dt2)
-    NUM_STEPS = 500_0000
-    STRIDE = 20  # sampling rate
+    NUM_STEPS = 2_000_000_000
+    STRIDE = 2000000  # sampling rate
     IC = "sine"  # initial condition, sine/sawtooth
-    MODES_TO_PLOT = 10
-    AMPLITUDE = 1
+    MODES_TO_PLOT = 20
+    AMPLITUDE = 0.4
 
     # 2. Initialization
 
