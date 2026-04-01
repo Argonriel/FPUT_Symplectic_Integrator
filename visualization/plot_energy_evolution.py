@@ -7,16 +7,19 @@ import numpy as np
 # base_name在隔壁，这里的png命名只是换掉后缀
 # 统一一下，所有图现在都没有plt.title了
 # N太大的话csv爆炸无敌大，最好别算shape
+# x轴单位根据最大的t变化，e-369，但是shape那里锁定了k，反正也用不到更大的，让我偷个懒
+# spectral图最完善
+
 # enter your csv file name here:
 CSV_FILE = "4096_beta1.0_A40_500M.csv"
 print(f"Reading data from: {CSV_FILE}...")
 
 plot_length = 10
 plot_height = 6
-my_dpi = 500
+my_dpi = 300
 important_modes = 5
-window_size = 10  # number of points taken to calculate average
-scale = 300  # 只对mode图生效，如果对y轴有什么要求
+window_size = 1  # number of points taken to calculate average，只对spectral生效，会把原数据淡淡地画在下一图层
+scale = 300  # 只对mode图生效
 
 # 0不要1要
 flag_mode = 0
@@ -24,7 +27,7 @@ flag_drift = 0
 flag_spectral = 1  # smooth & normalized
 flag_log = 0  # spectral图要不要log一下y轴？
 flag_heat = 0
-flag_old_data = 1  # 老数据开关 (0代表新数据的物理时间，1代表这是老数据用了步数)
+flag_old_data = 1  # 老数据开关 (0代表新数据的物理时间，1代表这是老数据用了步数)，只对spectral生效
 
 # 写小N要shape的几个时间点
 snapshot_indices = [
@@ -135,7 +138,7 @@ if flag_mode == 1:
         plt.annotate(f"M{i+1}", xy=(peak_x, peak_y), xytext=(x_offset, 3), color=line.get_color(),
                      ha=h_align, textcoords='offset points', fontweight='bold', fontsize=9, alpha=alpha_p)
 
-    plt.xlabel(f"Time (x{time_label} cycles)", fontsize=12)
+    plt.xlabel(f"Time (x{time_label})", fontsize=12)
     plt.ylabel("mode energy $E_k(t)$", fontsize=12)
     plt.ylim(0, df[modes_cols].max().max()*1.05)  # add margin above to avoid overlap
     # plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
@@ -162,14 +165,14 @@ if flag_drift == 1:
 
     plt.plot(t_scaled, rel_error, color='black', linewidth=1.0)
     plt.axhline(0, color='red', linestyle='--', alpha=0.5)
-    plt.xlabel(f'Time (x{time_label} cycles)', fontsize=12)
+    plt.xlabel(f'Time (x{time_label})', fontsize=12)
     plt.ylabel(r"Relative Error $\Delta E / E_0$", fontsize=12)
     plt.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
     plt.grid(True, alpha=0.3)  # 透明度
     plt.margins(0)  # margin太丑了
     plt.tight_layout()
 
-    plt.savefig(CSV_FILE.replace(".csv", "_drift.png"))  # 换个后缀
+    plt.savefig(CSV_FILE.replace(".csv", "_drift.pdf"))  # 换个后缀
     print("Energy drift plot saved")
 
 
@@ -213,10 +216,15 @@ if flag_spectral == 1:
             else:  # not important modes
                 lw, alpha, label = 0.8, 0.4, None
 
-        plt.plot(t_scaled, normalized_y, color=color, alpha=0.1, linewidth=0.5, zorder=1)  # original rough
-        plt.plot(t_scaled, smooth_y, color=color, linewidth=lw, alpha=alpha, label=label, zorder=2)  # smooth
+        # 动态计算 zorder：i 越小（Mode 越靠前），zorder 越大（图层越靠上）
+        # 保证平滑曲线 (smooth) 始终在毛刺曲线 (rough) 上方
+        z_rough = 50 - i
+        z_smooth = 100 - i
 
-    plt.xlabel(f"Time (x{time_label} cycles)")
+        plt.plot(t_scaled, normalized_y, color=color, alpha=0.1, linewidth=0.5, zorder=z_rough)  # original rough
+        plt.plot(t_scaled, smooth_y, color=color, linewidth=lw, alpha=alpha, label=label, zorder=z_smooth)  # smooth
+
+    plt.xlabel(f"Time (x{time_label})")
 
     if flag_log == 1:
         plt.ylabel("Normalized Energy $E_k(t) / E_1(0)$ (Log Scale)", fontsize=12)
@@ -226,12 +234,13 @@ if flag_spectral == 1:
         plt.ylabel("Normalized Energy $E_k(t) / E_1(0)$", fontsize=12)
         plt.ylim(0, 1.1)
 
-    plt.legend(loc='upper right', fontsize=10, framealpha=0.8)
+    lgd=plt.legend(loc='upper right', fontsize=10, framealpha=0.8)
+    lgd.set_zorder(1000)  # 强制让图例在最上面
     plt.grid(True, alpha=0.2)
     plt.margins(x=0)
     plt.tight_layout()
 
-    plt.savefig(CSV_FILE.replace(".csv", "_spectral.png"))
+    plt.savefig(CSV_FILE.replace(".csv", "_spectral.pdf"))
     print("Spectral plot saved")
 
 
@@ -250,7 +259,7 @@ if flag_heat == 1:
                      cbar_kws={'label': r'Log$_{10}$(Energy)'},
                      xticklabels=False, yticklabels=1)
 
-    plt.xlabel(f"Time (x{time_label} cycles)")
+    plt.xlabel(f"Time (x{time_label})")
     plt.ylabel("Mode Index", fontsize=12)
     plt.margins(0)
     plt.tight_layout()
@@ -284,18 +293,18 @@ if len(x_cols) > 0:
         color = shape_cmap(idx_count / (len(snapshot_indices) - 1))
         plt.plot(np.arange(N_val + 1), full_shape,
                  color=color, lw=1.5, alpha=0.9,
-                 label=f"t = {t_val / 1000:.1f}k cycles")
+                 label=f"step = {t_val / 1000:.1f}k ")
 
     plt.axhline(y=0, color='black', linestyle='--', alpha=0.5, lw=1)
     plt.xlabel("Particle Index $i$", fontsize=12)
-    plt.ylabel("Displacement $u_i$", fontsize=12)
+    plt.ylabel("Displacement $x_i$", fontsize=12)
 
     plt.legend(loc='upper right', fontsize=10, framealpha=0.8)
     plt.grid(True, alpha=0.2)
     plt.margins(x=0.02)
     plt.tight_layout()
 
-    shape_filename = CSV_FILE.replace(".csv", "_shape.png")
+    shape_filename = CSV_FILE.replace(".csv", "_shape.pdf")
     plt.savefig(shape_filename)
     print(f"Actual Shape plot saved as {shape_filename}")
 
