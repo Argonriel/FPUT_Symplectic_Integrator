@@ -2,3 +2,10 @@
 Revisiting_FPUT_Recurrence_Jiayi_Liwei_4_0.zip
 Revisiting_FPUT_Recurrence_Jiayi_Liwei_4_0/
 file_tree.txt
+data/
+logs/
+*.csv
+fput_yoshida
+fput_sim
+*.o
+__pycache__/
