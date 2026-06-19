@@ -2,17 +2,31 @@
 // 4th-order Yoshida symplectic integrator for FPUT-alpha/beta lattices
 //
 // Compile: g++ -O3 -march=native -o fput_yoshida FPUT_yoshida_solver.cpp
-// Usage:   ./fput_yoshida <N> <alpha|beta> <Value> <Amplitude> <SavePath> [--shape] [--entropy]
-// Example: ./fput_yoshida 1024 alpha 0.25 0.4 data/1024_a0.25_A0.4.csv
-//          ./fput_yoshida 32   alpha 0.25 2.0 data/32_shape.csv --shape
-//          ./fput_yoshida 1024 alpha 0.25 20  data/1024_entropy.csv --entropy
+// Usage:   ./fput_yoshida <N> <alpha|beta> <Value> <Amplitude> <SavePath> [options]
+//
+// Positional args (required, in order):
+//   N          number of particles + 1 (interior particles: N-1)
+//   alpha|beta nonlinearity type
+//   Value      alpha or beta coefficient
+//   Amplitude  mode-1 initial displacement amplitude
+//   SavePath   output CSV file path
+//
+// Optional flags (any order, defaults reproduce original behavior):
+//   --dt <double>    integration time step          (default: 0.1)
+//   --stride <int>   Yoshida steps between snapshots (default: 200000)
+//   --nseg <int>     number of snapshots             (default: 5000)
+//   --shape          append x1..x{N-1} columns; only allowed for N<=256
+//   --entropy        append Eta column (normalized spectral entropy, O(N^2)/snapshot)
+//
+// Physical run length: t_max = stride * nseg * dt
+// Examples:
+//   ./fput_yoshida 1024 alpha 0.25 0.4  data/1024_a0.25_A0.4.csv
+//   ./fput_yoshida 32   alpha 0.25 2.0  data/32_shape.csv --shape
+//   ./fput_yoshida 1024 alpha 0.25 20   data/1024_entropy.csv --entropy
+//   ./fput_yoshida 1024 alpha 0.1  0.4  data/out.csv --nseg 10000   # t_max = 2e8
 //
 // Output CSV format is identical to FPUT_cuda_solver.cu (compatible with
 // visualization scripts), with an extra "# Integrator: Yoshida4" header line.
-// With --shape (only allowed for N<=256), N-1 extra columns x1..x{N-1} are
-// appended to every row for spatial displacement visualization.
-// With --entropy, a single "Eta" column (normalized spectral entropy, 0..1) is
-// appended after TotalEnergy and before any shape columns. O(N^2) per snapshot.
 
 #include <iostream>
 #include <vector>
@@ -189,13 +203,40 @@ int main(int argc, char* argv[]) {
     const double      amplitude = std::stod(argv[4]);
     const std::string filename  = argv[5];
 
-    // Optional flags: --shape and --entropy (independent, any order).
-    bool shape_mode   = false;
-    bool entropy_mode = false;
+    // Optional flags and named parameters (any order after positional args).
+    bool   shape_mode   = false;
+    bool   entropy_mode = false;
+    double Dt           = 0.1;
+    long long stride    = 200000;
+    long long nseg      = 5000;
+
     for (int i = 6; i < argc; ++i) {
         const std::string arg(argv[i]);
-        if (arg == "--shape")   shape_mode   = true;
-        if (arg == "--entropy") entropy_mode = true;
+        if (arg == "--shape") {
+            shape_mode = true;
+        } else if (arg == "--entropy") {
+            entropy_mode = true;
+        } else if (arg == "--dt") {
+            if (i + 1 >= argc) { std::cerr << "Error: --dt requires a value.\n"; return 1; }
+            try { Dt = std::stod(argv[++i]); } catch (...) {
+                std::cerr << "Error: --dt value is not a valid number.\n"; return 1;
+            }
+            if (Dt <= 0.0) { std::cerr << "Error: --dt must be > 0.\n"; return 1; }
+        } else if (arg == "--stride") {
+            if (i + 1 >= argc) { std::cerr << "Error: --stride requires a value.\n"; return 1; }
+            try { stride = std::stoll(argv[++i]); } catch (...) {
+                std::cerr << "Error: --stride value is not a valid integer.\n"; return 1;
+            }
+            if (stride < 1) { std::cerr << "Error: --stride must be >= 1.\n"; return 1; }
+        } else if (arg == "--nseg") {
+            if (i + 1 >= argc) { std::cerr << "Error: --nseg requires a value.\n"; return 1; }
+            try { nseg = std::stoll(argv[++i]); } catch (...) {
+                std::cerr << "Error: --nseg value is not a valid integer.\n"; return 1;
+            }
+            if (nseg < 1) { std::cerr << "Error: --nseg must be >= 1.\n"; return 1; }
+        } else {
+            std::cerr << "Error: unknown flag '" << arg << "'.\n"; return 1;
+        }
     }
     if (shape_mode && N > 256) {
         std::cerr << "Error: --shape disabled for N>256 to avoid generating an enormous CSV;"
@@ -210,10 +251,8 @@ int main(int argc, char* argv[]) {
     const int model_flag = (model_str == "alpha") ? 0 : 1;
 
     // ---- Simulation parameters ----
-    const int    MODES_TO_PLOT = 20;
-    const double Dt            = 0.1;      // time step
-    const int    STRIDE        = 200000;   // Yoshida steps between snapshots
-    const int    NUM_SEGMENTS  = 5000;     // number of snapshots
+    const int MODES_TO_PLOT = 20;
+    // Dt, stride, nseg already parsed above (defaults: 0.1 / 200000 / 5000).
 
     const int M = N - 1;
     std::vector<double> x(M, 0.0), v(M, 0.0), F(M, 0.0);
@@ -230,13 +269,15 @@ int main(int argc, char* argv[]) {
 
     // Metadata header (same keys as FPUT_cuda_solver.cu + extra Integrator line)
     outFile << "# Integrator: Yoshida4\n"
-            << "# Model: "     << model_str << "\n"
-            << "# N: "         << N         << "\n"
+            << "# Model: "       << model_str << "\n"
+            << "# N: "           << N         << "\n"
             << "# " << (model_flag == 0 ? "Alpha" : "Beta") << ": " << value << "\n"
-            << "# Amplitude: " << amplitude << "\n"
-            << "# dt: "        << Dt        << "\n"
-            << "# Shape: "     << (shape_mode   ? 1 : 0) << "\n"
-            << "# Entropy: "   << (entropy_mode ? 1 : 0) << "\n";
+            << "# Amplitude: "   << amplitude << "\n"
+            << "# dt: "          << Dt        << "\n"
+            << "# Stride: "      << stride    << "\n"
+            << "# NumSegments: " << nseg      << "\n"
+            << "# Shape: "       << (shape_mode   ? 1 : 0) << "\n"
+            << "# Entropy: "     << (entropy_mode ? 1 : 0) << "\n";
     outFile << "Time";
     for (int i = 1; i <= MODES_TO_PLOT; ++i) outFile << ",Mode" << i;
     outFile << ",TotalEnergy";
@@ -247,7 +288,7 @@ int main(int argc, char* argv[]) {
     outFile << std::scientific << std::setprecision(15);
 
     std::vector<double> mode_E(MODES_TO_PLOT, 0.0);
-    const long long total_steps = (long long)STRIDE * NUM_SEGMENTS;
+    const long long total_steps = stride * nseg;
     auto t_wall = std::chrono::high_resolution_clock::now();
 
     std::cout << "FPUT Yoshida-4  |  N=" << N
@@ -255,12 +296,13 @@ int main(int argc, char* argv[]) {
               << "  |  A=" << amplitude
               << "  |  dt=" << Dt
               << "  |  total steps=" << total_steps
-              << "  |  t_max=" << total_steps * Dt << "\n";
+              << "  |  t_max=" << static_cast<double>(total_steps) * Dt << "\n";
 
-    for (int seg = 0; seg < NUM_SEGMENTS; ++seg) {
+    const int prog_every = std::max(1LL, nseg / 10);
+    for (long long seg = 0; seg < nseg; ++seg) {
 
         // Snapshot before advancing
-        const double t_current = (double)seg * STRIDE * Dt;
+        const double t_current = static_cast<double>(seg) * static_cast<double>(stride) * Dt;
         get_mode_energies(x, v, N, mode_E, MODES_TO_PLOT);
         outFile << t_current;
         for (int k = 0; k < MODES_TO_PLOT; ++k) outFile << "," << mode_E[k];
@@ -271,19 +313,27 @@ int main(int argc, char* argv[]) {
         outFile << "\n";
         if (seg % 50 == 0) outFile.flush();
 
-        // Advance STRIDE Yoshida steps
-        for (int step = 0; step < STRIDE; ++step)
+        // Advance stride Yoshida steps
+        for (long long step = 0; step < stride; ++step)
             yoshida_step(x, v, F, N, Dt, value, model_flag);
 
-        const int prog_every = std::max(1, NUM_SEGMENTS / 10);
         if (seg % prog_every == 0) {
             auto now = std::chrono::high_resolution_clock::now();
             const double elapsed = std::chrono::duration<double>(now - t_wall).count();
             std::cout << "  " << std::fixed << std::setprecision(1)
-                      << (100.0 * seg / NUM_SEGMENTS) << "%"
+                      << (100.0 * seg / nseg) << "%"
                       << "  |  t=" << t_current
                       << "  |  " << elapsed << "s elapsed\n" << std::flush;
         }
+    }
+
+    // Final 100% progress line
+    {
+        auto now = std::chrono::high_resolution_clock::now();
+        const double elapsed = std::chrono::duration<double>(now - t_wall).count();
+        const double t_final = static_cast<double>(nseg - 1) * static_cast<double>(stride) * Dt;
+        std::cout << "  100.0%  |  t=" << t_final
+                  << "  |  " << elapsed << "s elapsed\n" << std::flush;
     }
 
     outFile.close();
