@@ -5,6 +5,7 @@
 * **Dual Solvers**: 
   * `FPUT_1024_solver.py`: CPU-optimized solver using Numba JIT (ideal for $N<1024$ and extracting spatial shapes).
   * `FPUT_4096_solver.py`: GPU-accelerated solver (ideal for massive $N$).
+  * `simulations_cpu/yoshida/FPUT_yoshida_solver.cpp`: 4th-order Yoshida symplectic integrator (CPU). Compile with: `g++ -O3 -march=native -o fput_yoshida FPUT_yoshida_solver.cpp`
 * ** Plot **: The solvers automatically save physical parameters ($\alpha, \beta, N, dt$, etc.) within the generated `.csv` headers. Run the plotter to get visualize modal energy evolution, spectral energy heatmaps, spatial wave displacement.
 
 ## 📦 Requirements
