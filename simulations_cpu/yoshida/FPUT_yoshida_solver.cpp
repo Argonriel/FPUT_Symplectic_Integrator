@@ -275,7 +275,8 @@ int main(int argc, char* argv[]) {
         for (int step = 0; step < STRIDE; ++step)
             yoshida_step(x, v, F, N, Dt, value, model_flag);
 
-        if (seg % (NUM_SEGMENTS / 10) == 0) {
+        const int prog_every = std::max(1, NUM_SEGMENTS / 10);
+        if (seg % prog_every == 0) {
             auto now = std::chrono::high_resolution_clock::now();
             const double elapsed = std::chrono::duration<double>(now - t_wall).count();
             std::cout << "  " << std::fixed << std::setprecision(1)
