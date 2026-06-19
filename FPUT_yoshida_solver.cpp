@@ -2,11 +2,14 @@
 // 4th-order Yoshida symplectic integrator for FPUT-alpha/beta lattices
 //
 // Compile: g++ -O3 -march=native -o fput_yoshida FPUT_yoshida_solver.cpp
-// Usage:   ./fput_yoshida <N> <alpha|beta> <Value> <Amplitude> <SavePath>
+// Usage:   ./fput_yoshida <N> <alpha|beta> <Value> <Amplitude> <SavePath> [--shape]
 // Example: ./fput_yoshida 1024 alpha 0.25 0.4 data/1024_a0.25_A0.4.csv
+//          ./fput_yoshida 32   alpha 0.25 2.0 data/32_shape.csv --shape
 //
 // Output CSV format is identical to FPUT_cuda_solver.cu (compatible with
 // visualization scripts), with an extra "# Integrator: Yoshida4" header line.
+// With --shape (only allowed for N<=256), N-1 extra columns x1..x{N-1} are
+// appended to every row for spatial displacement visualization.
 
 #include <iostream>
 #include <vector>
@@ -139,7 +142,7 @@ static double get_total_energy(const std::vector<double>& x,
 int main(int argc, char* argv[]) {
     if (argc < 6) {
         std::cerr << "Usage: " << argv[0]
-                  << " <N> <alpha|beta> <Value> <Amplitude> <SavePath>\n";
+                  << " <N> <alpha|beta> <Value> <Amplitude> <SavePath> [--shape]\n";
         return 1;
     }
 
@@ -148,6 +151,17 @@ int main(int argc, char* argv[]) {
     const double      value     = std::stod(argv[3]);
     const double      amplitude = std::stod(argv[4]);
     const std::string filename  = argv[5];
+
+    // Optional --shape flag: dump particle displacements at each snapshot.
+    bool shape_mode = false;
+    for (int i = 6; i < argc; ++i) {
+        if (std::string(argv[i]) == "--shape") { shape_mode = true; break; }
+    }
+    if (shape_mode && N > 256) {
+        std::cerr << "Error: --shape disabled for N>256 to avoid generating an enormous CSV;"
+                     " remove --shape or use a smaller N.\n";
+        return 1;
+    }
 
     if (model_str != "alpha" && model_str != "beta") {
         std::cerr << "Error: model must be 'alpha' or 'beta'.\n";
@@ -180,10 +194,14 @@ int main(int argc, char* argv[]) {
             << "# N: "         << N         << "\n"
             << "# " << (model_flag == 0 ? "Alpha" : "Beta") << ": " << value << "\n"
             << "# Amplitude: " << amplitude << "\n"
-            << "# dt: "        << Dt        << "\n";
+            << "# dt: "        << Dt        << "\n"
+            << "# Shape: "     << (shape_mode ? 1 : 0) << "\n";
     outFile << "Time";
     for (int i = 1; i <= MODES_TO_PLOT; ++i) outFile << ",Mode" << i;
-    outFile << ",TotalEnergy\n";
+    outFile << ",TotalEnergy";
+    if (shape_mode)
+        for (int j = 1; j < N; ++j) outFile << ",x" << j;
+    outFile << "\n";
     outFile << std::scientific << std::setprecision(15);
 
     std::vector<double> mode_E(MODES_TO_PLOT, 0.0);
@@ -204,7 +222,10 @@ int main(int argc, char* argv[]) {
         get_mode_energies(x, v, N, mode_E, MODES_TO_PLOT);
         outFile << t_current;
         for (int k = 0; k < MODES_TO_PLOT; ++k) outFile << "," << mode_E[k];
-        outFile << "," << get_total_energy(x, v, N, value, model_flag) << "\n";
+        outFile << "," << get_total_energy(x, v, N, value, model_flag);
+        if (shape_mode)
+            for (int j = 0; j < M; ++j) outFile << "," << x[j];
+        outFile << "\n";
         if (seg % 50 == 0) outFile.flush();
 
         // Advance STRIDE Yoshida steps
