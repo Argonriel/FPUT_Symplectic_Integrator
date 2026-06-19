@@ -2,14 +2,17 @@
 // 4th-order Yoshida symplectic integrator for FPUT-alpha/beta lattices
 //
 // Compile: g++ -O3 -march=native -o fput_yoshida FPUT_yoshida_solver.cpp
-// Usage:   ./fput_yoshida <N> <alpha|beta> <Value> <Amplitude> <SavePath> [--shape]
+// Usage:   ./fput_yoshida <N> <alpha|beta> <Value> <Amplitude> <SavePath> [--shape] [--entropy]
 // Example: ./fput_yoshida 1024 alpha 0.25 0.4 data/1024_a0.25_A0.4.csv
 //          ./fput_yoshida 32   alpha 0.25 2.0 data/32_shape.csv --shape
+//          ./fput_yoshida 1024 alpha 0.25 20  data/1024_entropy.csv --entropy
 //
 // Output CSV format is identical to FPUT_cuda_solver.cu (compatible with
 // visualization scripts), with an extra "# Integrator: Yoshida4" header line.
 // With --shape (only allowed for N<=256), N-1 extra columns x1..x{N-1} are
 // appended to every row for spatial displacement visualization.
+// With --entropy, a single "Eta" column (normalized spectral entropy, 0..1) is
+// appended after TotalEnergy and before any shape columns. O(N^2) per snapshot.
 
 #include <iostream>
 #include <vector>
@@ -115,6 +118,40 @@ static void get_mode_energies(const std::vector<double>& x,
     }
 }
 
+// Normalized spectral entropy over ALL N-1 normal modes (O(N^2) per call).
+// Only called when --entropy is set; the cheap 20-mode path above is unchanged.
+// eta = S / ln(N-1),  S = -sum_k p_k*ln(p_k),  p_k = E_k / sum_j(E_j)
+// Treats 0*ln(0) as 0 (skip modes with E_k <= 1e-15 to avoid log(0)).
+static double full_spectrum_entropy(const std::vector<double>& x,
+                                    const std::vector<double>& v, int N) {
+    const int    M      = N - 1;
+    const double factor = std::sqrt(2.0 / N);
+    double E_sum = 0.0;
+    std::vector<double> E(M);
+    for (int k = 1; k <= M; ++k) {
+        double Q_k = 0.0, P_k = 0.0;
+        for (int j = 1; j <= M; ++j) {
+            const double s = std::sin(M_PI * j * k / N);
+            Q_k += x[j - 1] * s;
+            P_k += v[j - 1] * s;
+        }
+        Q_k *= factor;
+        P_k *= factor;
+        const double omega = 2.0 * std::sin(M_PI * k / (2.0 * N));
+        E[k - 1] = 0.5 * (P_k * P_k + omega * omega * Q_k * Q_k);
+        E_sum += E[k - 1];
+    }
+    if (E_sum <= 0.0) return 0.0;
+    double S = 0.0;
+    for (int k = 0; k < M; ++k) {
+        if (E[k] > 1e-15) {
+            const double p = E[k] / E_sum;
+            S -= p * std::log(p);
+        }
+    }
+    return S / std::log(static_cast<double>(M));
+}
+
 // Total Hamiltonian: H = K + V_linear + V_nonlinear
 // V = sum_i [ r_i^2/2 + alpha*r_i^3/3 ]  or  [ r_i^2/2 + beta*r_i^4/4 ]
 // where r_i = x_{i+1} - x_i, with x_0 = x_N = 0.
@@ -142,7 +179,7 @@ static double get_total_energy(const std::vector<double>& x,
 int main(int argc, char* argv[]) {
     if (argc < 6) {
         std::cerr << "Usage: " << argv[0]
-                  << " <N> <alpha|beta> <Value> <Amplitude> <SavePath> [--shape]\n";
+                  << " <N> <alpha|beta> <Value> <Amplitude> <SavePath> [--shape] [--entropy]\n";
         return 1;
     }
 
@@ -152,10 +189,13 @@ int main(int argc, char* argv[]) {
     const double      amplitude = std::stod(argv[4]);
     const std::string filename  = argv[5];
 
-    // Optional --shape flag: dump particle displacements at each snapshot.
-    bool shape_mode = false;
+    // Optional flags: --shape and --entropy (independent, any order).
+    bool shape_mode   = false;
+    bool entropy_mode = false;
     for (int i = 6; i < argc; ++i) {
-        if (std::string(argv[i]) == "--shape") { shape_mode = true; break; }
+        const std::string arg(argv[i]);
+        if (arg == "--shape")   shape_mode   = true;
+        if (arg == "--entropy") entropy_mode = true;
     }
     if (shape_mode && N > 256) {
         std::cerr << "Error: --shape disabled for N>256 to avoid generating an enormous CSV;"
@@ -195,10 +235,12 @@ int main(int argc, char* argv[]) {
             << "# " << (model_flag == 0 ? "Alpha" : "Beta") << ": " << value << "\n"
             << "# Amplitude: " << amplitude << "\n"
             << "# dt: "        << Dt        << "\n"
-            << "# Shape: "     << (shape_mode ? 1 : 0) << "\n";
+            << "# Shape: "     << (shape_mode   ? 1 : 0) << "\n"
+            << "# Entropy: "   << (entropy_mode ? 1 : 0) << "\n";
     outFile << "Time";
     for (int i = 1; i <= MODES_TO_PLOT; ++i) outFile << ",Mode" << i;
     outFile << ",TotalEnergy";
+    if (entropy_mode) outFile << ",Eta";
     if (shape_mode)
         for (int j = 1; j < N; ++j) outFile << ",x" << j;
     outFile << "\n";
@@ -223,6 +265,7 @@ int main(int argc, char* argv[]) {
         outFile << t_current;
         for (int k = 0; k < MODES_TO_PLOT; ++k) outFile << "," << mode_E[k];
         outFile << "," << get_total_energy(x, v, N, value, model_flag);
+        if (entropy_mode) outFile << "," << full_spectrum_entropy(x, v, N);
         if (shape_mode)
             for (int j = 0; j < M; ++j) outFile << "," << x[j];
         outFile << "\n";
