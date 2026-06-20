@@ -16,22 +16,22 @@ def run_task(args):
     if os.path.exists(outpath):
         return ("skipped", outname)
 
-    cmd = [
-        binary,
-        str(N), model, str(value), str(amplitude),
-        outpath,
-        "--dt", "0.1",
-        "--stride", "5000",
-        "--nseg", "200",
-        "--entropy",
-    ]
+    cmd = [binary, str(N), model, str(value), str(amplitude), outpath,
+           "--dt", "0.1", "--stride", "5000", "--nseg", "200", "--entropy"]
 
-    with open(logpath, "w") as log:
-        result = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
-
-    if result.returncode != 0:
+    try:
+        with open(logpath, "w") as log:
+            result = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
+        if result.returncode != 0:
+            return ("failed", outname)
+        return ("done", outname)
+    except Exception as e:
+        try:
+            with open(logpath, "a") as log:
+                log.write(f"\nEXCEPTION in run_task: {e}\n")
+        except Exception:
+            pass
         return ("failed", outname)
-    return ("done", outname)
 
 
 def main():
