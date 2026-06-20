@@ -17,7 +17,7 @@ def run_task(args):
         return ("skipped", outname)
 
     cmd = [binary, str(N), model, str(value), str(amplitude), outpath,
-           "--dt", "0.1", "--stride", "5000", "--nseg", "200", "--entropy"]
+           "--dt", "0.1", "--stride", "2800000", "--nseg", "500", "--entropy"]
 
     try:
         with open(logpath, "w") as log:
