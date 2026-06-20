@@ -1,3 +1,5 @@
+import sys
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,11 +28,22 @@ def plot_threshold(csv_file, output_filename):
     p0 = [0.8, np.median(x), 0.05, 0.05]
 
     try:
-        popt, _ = curve_fit(sigmoid, x, y, p0=p0, bounds=(lower_bounds, upper_bounds), maxfev=10000)
+        popt, pcov = curve_fit(sigmoid, x, y, p0=p0, bounds=(lower_bounds, upper_bounds), maxfev=10000)
         Ac = popt[1]
+        Ac_err = np.sqrt(pcov[1, 1])
     except Exception as e:
         print(f"Fit failed: {e}")
-        return
+        return None, None
+
+    all_bounds = list(zip(lower_bounds, upper_bounds))
+    for i, (val, (lo, hi)) in enumerate(zip(popt, all_bounds)):
+        span = hi - lo
+        if span > 0 and (abs(val - lo) / span < 0.01 or abs(val - hi) / span < 0.01):
+            print(
+                f"WARNING: fit parameter [{i}] = {val:.4g} is within 1% of its bound "
+                f"[{lo:.4g}, {hi:.4g}]. Covariance-based error estimate may be unreliable.",
+                file=sys.stderr,
+            )
 
     fig, ax = plt.subplots(figsize=(7, 5))
 
@@ -43,7 +56,7 @@ def plot_threshold(csv_file, output_filename):
 
     ax.grid(True, linestyle=':', linewidth=1.5, alpha=0.5, zorder=0)
     ax.plot(x_fit, y_fit, color='#DC143C', linestyle='-', linewidth=2.5, label='Logistic Fit', zorder=2)
-    ax.axvline(Ac, color='#FF8C00', linestyle='--', linewidth=2, label=rf'$A_c \approx {Ac:.1f}$', zorder=2)
+    ax.axvline(Ac, color='#FF8C00', linestyle='--', linewidth=2, label=rf'$A_c = {Ac:.1f} \pm {Ac_err:.1f}$', zorder=2)
     ax.scatter(x, y, color='#4B0082', s=80, alpha=0.8, edgecolors='w', label='Simulation Data', zorder=3) 
     
     ax.set_xlabel(r'Initial Amplitude ($A$)')
@@ -55,3 +68,4 @@ def plot_threshold(csv_file, output_filename):
     plt.tight_layout()
     plt.savefig(output_filename, dpi=300, bbox_inches='tight')
     plt.close()
+    return Ac, Ac_err
