@@ -23,5 +23,8 @@ __pycache__/
 results/
 .pytest_cache/
 
+# Generated figures (PNG/PDF) from analysis, e.g. figures/alpha_pilot_v1/.
+figures/
+
 # Smoke-test / scratch output (checkpoints, logs, CSVs, figures) — never tracked.
 scratch/
